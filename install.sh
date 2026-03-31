@@ -35,7 +35,18 @@ TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
 if [ -z "$TAG" ]; then
     error "Could not determine latest release"
 fi
-info "Latest release: ${TAG}"
+
+# Check if already up to date.
+if command -v "$BINARY" &>/dev/null; then
+    CURRENT="$("$BINARY" --version 2>/dev/null || echo "unknown")"
+    if [ "$CURRENT" = "clipall ${TAG}" ]; then
+        info "Already up to date (${TAG})"
+        exit 0
+    fi
+    info "Updating: ${CURRENT:-unknown} -> ${TAG}"
+else
+    info "Installing: ${TAG}"
+fi
 
 # Download binary.
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"

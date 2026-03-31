@@ -9,6 +9,19 @@ $Release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest
 $Tag = $Release.tag_name
 Write-Host "==> Latest release: $Tag" -ForegroundColor Cyan
 
+# Check if already up to date.
+$ExistingBin = Get-Command clipall -ErrorAction SilentlyContinue
+if ($ExistingBin) {
+    $Current = & clipall --version 2>$null
+    if ($Current -eq "clipall $Tag") {
+        Write-Host "==> Already up to date ($Tag)" -ForegroundColor Green
+        exit 0
+    }
+    Write-Host "==> Updating: $Current -> $Tag" -ForegroundColor Cyan
+} else {
+    Write-Host "==> Installing: $Tag" -ForegroundColor Cyan
+}
+
 $Asset = "clipall-windows-amd64.exe"
 $Url = "https://github.com/$Repo/releases/download/$Tag/$Asset"
 

@@ -11,11 +11,20 @@ import (
 	"syscall"
 )
 
+// version is set at build time via -ldflags.
+var version = "dev"
+
 func main() {
 	peers := flag.String("peers", "", "comma-separated peer addresses (host:port)")
 	listen := flag.Int("listen", 9876, "port to listen on")
 	configFile := flag.String("config", "", "path to config file (default: auto-detect)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("clipall %s\n", version)
+		os.Exit(0)
+	}
 
 	cfg := DefaultConfig()
 
