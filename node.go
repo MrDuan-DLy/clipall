@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -148,15 +147,16 @@ func (n *Node) Run(ctx context.Context) error {
 			case TypeImage:
 				n.lastWrite = time.Now()
 				writeImage(msg.Payload)
+				// Image readback will differ cross-platform (PNG→DIB→PNG re-encoding
+				// on Windows produces different bytes). Always add the readback hash
+				// to the ring buffer to suppress the echo, don't treat mismatch as error.
 				readback := readImage()
-				if bytes.Equal(readback, msg.Payload) {
-					log.Printf("[node] received image %d bytes, write verified OK, hash=%016x",
-						len(msg.Payload), msg.ContentID)
-				} else {
-					log.Printf("[node] WARNING: image write mismatch! wrote %d bytes, read back %d bytes",
-						len(msg.Payload), len(readback))
-					n.ring.Add(xxhash.Sum64(readback))
+				rbHash := xxhash.Sum64(readback)
+				if rbHash != msg.ContentID {
+					n.ring.Add(rbHash)
 				}
+				log.Printf("[node] received image %d bytes, hash=%016x, wrote to clipboard (%d bytes readback)",
+					len(msg.Payload), msg.ContentID, len(readback))
 			default:
 				log.Printf("[node] ignoring message type 0x%02x", msg.Type)
 			}
