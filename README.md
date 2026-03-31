@@ -34,34 +34,39 @@ Each device runs a lightweight daemon that watches the local clipboard. When you
 
 ## Quick Start
 
-### 1. Download
+### Install
 
-Grab the latest binary from [Releases](https://github.com/MrDuan-DLy/clipall/releases):
+**macOS / Linux:**
 
-| Platform | File |
-|----------|------|
-| macOS (Apple Silicon) | `clipall-darwin-arm64` |
-| macOS (Intel) | `clipall-darwin-amd64` |
-| Windows x64 | `clipall-windows-amd64.exe` |
+```bash
+curl -fsSL https://raw.githubusercontent.com/MrDuan-DLy/clipall/main/install.sh | bash
+```
 
-### 2. Run
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/MrDuan-DLy/clipall/main/install.ps1 | iex
+```
+
+Or download binaries manually from [Releases](https://github.com/MrDuan-DLy/clipall/releases).
+
+### Run
 
 On your Mac:
 
 ```bash
-chmod +x clipall-darwin-arm64
-./clipall-darwin-arm64 --peers <windows-hostname>:9876
+clipall --peers <windows-hostname>:9876
 ```
 
 On your Windows machine:
 
 ```powershell
-.\clipall-windows-amd64.exe --peers <mac-hostname>:9876
+clipall --peers <mac-hostname>:9876
 ```
 
 Replace `<windows-hostname>` and `<mac-hostname>` with the Tailscale hostnames of your devices (check with `tailscale status`).
 
-That's it. Copy text on one machine, paste on the other.
+That's it. Copy on one machine, paste on the other.
 
 ## Configuration
 
