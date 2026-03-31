@@ -9,7 +9,7 @@
 
 <p align="center">
   Cross-platform clipboard sync over <a href="https://tailscale.com">Tailscale</a>.<br>
-  Copy on Mac, paste on Windows. And vice versa. Instantly.
+  Copy text or images on Mac, paste on Windows. And vice versa. Instantly.
 </p>
 
 ---
@@ -21,12 +21,12 @@
 ┌──────────┐    Tailscale     ┌──────────┐
 │ clipall   │◄── TCP:9876 ──►│ clipall   │
 │           │   (WireGuard)   │           │
-│ clipboard │                 │ clipboard │
-│  watch    │                 │  watch    │
+│ clipboard │  text + image   │ clipboard │
+│  watch    │     (PNG)       │  watch    │
 └──────────┘                  └──────────┘
 ```
 
-Each device runs a lightweight daemon that watches the local clipboard. When you copy something, it's sent to all peers over your existing Tailscale network. The peer writes it to its local clipboard. Done.
+Each device runs a lightweight daemon that watches the local clipboard. When you copy text or an image, it's sent to all peers over your existing Tailscale network. The peer writes it to its local clipboard. Done. Image data is transferred in PNG format.
 
 - **No cloud.** Traffic stays on your Tailscale network, encrypted end-to-end by WireGuard.
 - **No account.** No sign-up, no server, no subscription.
@@ -112,7 +112,7 @@ GOOS=windows GOARCH=amd64 go build -o clipall.exe .
 |-----------|------|---------|
 | Wire Protocol | `protocol.go` | 14-byte binary header + payload |
 | Loop Prevention | `loop.go` | xxHash64 ring buffer (32 entries) |
-| Clipboard | `clipboard.go` | Watch/Read/Write via native APIs |
+| Clipboard | `clipboard.go` | Watch/Read/Write text and images (PNG) via native APIs |
 | Networking | `peer.go` | TCP connections with auto-reconnect |
 | Orchestrator | `node.go` | Event loop tying everything together |
 | Config | `config.go` | YAML + CLI flag parsing |
@@ -129,7 +129,7 @@ When device A syncs to device B, writing to B's clipboard would trigger B's watc
 
 ## Roadmap
 
-- [ ] Image clipboard sync (PNG)
+- [x] Image clipboard sync (PNG)
 - [ ] System tray icon with connection status
 - [ ] Auto-start (launchd / Task Scheduler)
 - [ ] Clipboard history

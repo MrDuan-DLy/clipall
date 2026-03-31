@@ -117,6 +117,66 @@ func TestDecodePayloadTooLarge(t *testing.T) {
 	}
 }
 
+func TestDecodeSequentialMessages(t *testing.T) {
+	textMsg := Message{
+		Type:      TypeText,
+		ContentID: 1,
+		Payload:   []byte("hello clipboard"),
+	}
+	imgPayload := make([]byte, 256)
+	for i := range imgPayload {
+		imgPayload[i] = byte(i % 256)
+	}
+	imgMsg := Message{
+		Type:      TypeImage,
+		ContentID: 2,
+		Payload:   imgPayload,
+	}
+
+	// Concatenate both encoded messages into a single buffer, as a TCP
+	// connection would deliver them.
+	var buf bytes.Buffer
+	buf.Write(Encode(textMsg))
+	buf.Write(Encode(imgMsg))
+
+	// Decode the first message.
+	got1, err := Decode(&buf)
+	if err != nil {
+		t.Fatalf("Decode first message: %v", err)
+	}
+	if got1.Type != TypeText {
+		t.Errorf("first message Type = 0x%02x, want 0x%02x", got1.Type, TypeText)
+	}
+	if got1.ContentID != 1 {
+		t.Errorf("first message ContentID = %d, want 1", got1.ContentID)
+	}
+	if !bytes.Equal(got1.Payload, textMsg.Payload) {
+		t.Errorf("first message Payload = %q, want %q", got1.Payload, textMsg.Payload)
+	}
+
+	// Decode the second message from the same buffer.
+	got2, err := Decode(&buf)
+	if err != nil {
+		t.Fatalf("Decode second message: %v", err)
+	}
+	if got2.Type != TypeImage {
+		t.Errorf("second message Type = 0x%02x, want 0x%02x", got2.Type, TypeImage)
+	}
+	if got2.ContentID != 2 {
+		t.Errorf("second message ContentID = %d, want 2", got2.ContentID)
+	}
+	if !bytes.Equal(got2.Payload, imgPayload) {
+		t.Errorf("second message Payload mismatch: got %d bytes, want %d bytes",
+			len(got2.Payload), len(imgPayload))
+	}
+
+	// Buffer should now be empty; a third Decode should fail.
+	_, err = Decode(&buf)
+	if err == nil {
+		t.Fatal("expected error decoding from exhausted buffer, got nil")
+	}
+}
+
 func TestEncodeDecodePreservesContentID(t *testing.T) {
 	contentID := uint64(0xDEADBEEFCAFEBABE)
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -56,9 +57,10 @@ func (n *Node) Run(ctx context.Context) error {
 		go p.Run(ctx)
 	}
 
-	// Watch local clipboard for changes.
+	// Watch local clipboard for changes (text and image).
 	clipCh := watchText(ctx)
-	log.Printf("[node] watching clipboard, %d peer(s) configured", len(n.peers))
+	imgCh := watchImage(ctx)
+	log.Printf("[node] watching clipboard (text+image), %d peer(s) configured", len(n.peers))
 
 	// Main event loop.
 	for {
@@ -96,6 +98,30 @@ func (n *Node) Run(ctx context.Context) error {
 			log.Printf("[node] sent %d bytes to %d peer(s), hash=%016x, preview=%s",
 				len(data), len(n.peers), id, debugPreview(data))
 
+		case data := <-imgCh:
+			if len(data) == 0 {
+				continue
+			}
+			if time.Since(n.lastWrite) < writeCooldown {
+				log.Printf("[node] ignoring image event during cooldown (%d bytes)", len(data))
+				continue
+			}
+			id := xxhash.Sum64(data)
+			if n.ring.Contains(id) {
+				log.Printf("[node] ignoring image event (in ring buffer), hash=%016x", id)
+				continue
+			}
+			msg := Message{
+				Type:      TypeImage,
+				ContentID: id,
+				Payload:   data,
+			}
+			for _, p := range n.peers {
+				p.Send(msg)
+			}
+			log.Printf("[node] sent image %d bytes to %d peer(s), hash=%016x",
+				len(data), len(n.peers), id)
+
 		case msg := <-n.incoming:
 			if n.ring.Contains(msg.ContentID) {
 				log.Printf("[node] ignoring incoming (in ring buffer), hash=%016x", msg.ContentID)
@@ -117,6 +143,18 @@ func (n *Node) Run(ctx context.Context) error {
 					log.Printf("[node]   wrote:    %s", debugHex(msg.Payload))
 					log.Printf("[node]   readback: %s", debugHex(readback))
 					// Add readback hash to ring too, so the mismatched Watch event is caught.
+					n.ring.Add(xxhash.Sum64(readback))
+				}
+			case TypeImage:
+				n.lastWrite = time.Now()
+				writeImage(msg.Payload)
+				readback := readImage()
+				if bytes.Equal(readback, msg.Payload) {
+					log.Printf("[node] received image %d bytes, write verified OK, hash=%016x",
+						len(msg.Payload), msg.ContentID)
+				} else {
+					log.Printf("[node] WARNING: image write mismatch! wrote %d bytes, read back %d bytes",
+						len(msg.Payload), len(readback))
 					n.ring.Add(xxhash.Sum64(readback))
 				}
 			default:
