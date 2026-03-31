@@ -7,7 +7,7 @@ import (
 )
 
 func TestNewNodeInitialization(t *testing.T) {
-	n := NewNode(9876, []string{"host-a:9876", "host-b:9876"})
+	n := NewNode(9876, []string{"host-a:9876", "host-b:9876"}, "")
 
 	if n.listenPort != 9876 {
 		t.Errorf("listenPort = %d, want 9876", n.listenPort)
@@ -27,7 +27,7 @@ func TestNewNodeInitialization(t *testing.T) {
 }
 
 func TestNewNodeNoPeers(t *testing.T) {
-	n := NewNode(5555, nil)
+	n := NewNode(5555, nil, "")
 
 	if n.listenPort != 5555 {
 		t.Errorf("listenPort = %d, want 5555", n.listenPort)
@@ -38,7 +38,7 @@ func TestNewNodeNoPeers(t *testing.T) {
 }
 
 func TestIncomingTextRingBufferDedup(t *testing.T) {
-	n := NewNode(9876, nil)
+	n := NewNode(9876, nil, "")
 
 	payload := []byte("hello clipboard")
 	id := xxhash.Sum64(payload)
@@ -64,7 +64,7 @@ func TestIncomingTextRingBufferDedup(t *testing.T) {
 }
 
 func TestIncomingImageRingBufferDedup(t *testing.T) {
-	n := NewNode(9876, nil)
+	n := NewNode(9876, nil, "")
 
 	payload := make([]byte, 1024)
 	for i := range payload {
@@ -90,7 +90,7 @@ func TestIncomingImageRingBufferDedup(t *testing.T) {
 }
 
 func TestIncomingMixedTypeDedup(t *testing.T) {
-	n := NewNode(9876, nil)
+	n := NewNode(9876, nil, "")
 
 	textPayload := []byte("some text")
 	textID := xxhash.Sum64(textPayload)
@@ -119,7 +119,7 @@ func TestIncomingMixedTypeDedup(t *testing.T) {
 }
 
 func TestIncomingChannelCapacity(t *testing.T) {
-	n := NewNode(9876, nil)
+	n := NewNode(9876, nil, "")
 
 	// The incoming channel has a buffer of 32. Fill it without blocking.
 	for i := 0; i < 32; i++ {
@@ -145,7 +145,7 @@ func TestIncomingChannelCapacity(t *testing.T) {
 }
 
 func TestIncomingDrainBothTypes(t *testing.T) {
-	n := NewNode(9876, nil)
+	n := NewNode(9876, nil, "")
 
 	textMsg := Message{
 		Type:      TypeText,
@@ -183,7 +183,7 @@ func TestRingBufferPreventsLoopAcrossTypes(t *testing.T) {
 	// Simulate the full loop-prevention scenario: a node receives content,
 	// adds it to the ring, then sees the same content from the clipboard
 	// watcher. Both text and image types should be caught.
-	n := NewNode(9876, nil)
+	n := NewNode(9876, nil, "")
 
 	textData := []byte("clipboard text")
 	imgData := make([]byte, 512)

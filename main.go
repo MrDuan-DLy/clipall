@@ -18,6 +18,7 @@ func main() {
 	peers := flag.String("peers", "", "comma-separated peer addresses (host:port)")
 	listen := flag.Int("listen", 9876, "port to listen on")
 	configFile := flag.String("config", "", "path to config file (default: auto-detect)")
+	imageDir := flag.String("save-images-to", "", "save incoming images to this directory (e.g. /tmp/clipall)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -76,12 +77,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Printf("[main] clipall starting, peers: %v, listen: :%d", peerAddrs, cfg.Listen.Port)
+	if *imageDir != "" {
+		log.Printf("[main] clipall starting, peers: %v, listen: :%d, images: %s", peerAddrs, cfg.Listen.Port, *imageDir)
+	} else {
+		log.Printf("[main] clipall starting, peers: %v, listen: :%d", peerAddrs, cfg.Listen.Port)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	node := NewNode(cfg.Listen.Port, peerAddrs)
+	node := NewNode(cfg.Listen.Port, peerAddrs, *imageDir)
 	if err := node.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

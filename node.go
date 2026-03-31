@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -20,13 +22,15 @@ type Node struct {
 	peers      []*Peer
 	incoming   chan Message
 	ring       RingBuffer
-	lastWrite  time.Time // when we last wrote to clipboard from a remote
+	lastWrite  time.Time  // when we last wrote to clipboard from a remote
+	imageDir   string     // if set, save incoming images to this directory
 }
 
-func NewNode(listenPort int, peerAddrs []string) *Node {
+func NewNode(listenPort int, peerAddrs []string, imageDir string) *Node {
 	n := &Node{
 		listenPort: listenPort,
 		incoming:   make(chan Message, 32),
+		imageDir:   imageDir,
 	}
 	for _, addr := range peerAddrs {
 		n.peers = append(n.peers, NewPeer(addr))
@@ -157,6 +161,14 @@ func (n *Node) Run(ctx context.Context) error {
 				}
 				log.Printf("[node] received image %d bytes, hash=%016x, wrote to clipboard (%d bytes readback)",
 					len(msg.Payload), msg.ContentID, len(readback))
+
+				if n.imageDir != "" {
+					if path, err := n.saveImage(msg.Payload); err != nil {
+						log.Printf("[node] failed to save image: %v", err)
+					} else {
+						log.Printf("[node] saved image to %s", path)
+					}
+				}
 			default:
 				log.Printf("[node] ignoring message type 0x%02x", msg.Type)
 			}
@@ -198,6 +210,18 @@ func (n *Node) handleConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 	}
+}
+
+// saveImage writes PNG data to imageDir/latest.png, returning the path.
+func (n *Node) saveImage(data []byte) (string, error) {
+	if err := os.MkdirAll(n.imageDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir %s: %w", n.imageDir, err)
+	}
+	path := filepath.Join(n.imageDir, "latest.png")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // debugPreview returns the first 40 chars of data for logging.
