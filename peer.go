@@ -56,6 +56,10 @@ func (p *Peer) connect(ctx context.Context) error {
 		dialer := net.Dialer{Timeout: 5 * time.Second}
 		conn, err := dialer.DialContext(ctx, "tcp", p.addr)
 		if err == nil {
+			if tc, ok := conn.(*net.TCPConn); ok {
+				tc.SetKeepAlive(true)
+				tc.SetKeepAlivePeriod(10 * time.Second)
+			}
 			p.mu.Lock()
 			p.conn = conn
 			p.mu.Unlock()
@@ -89,6 +93,7 @@ func (p *Peer) writeLoop(ctx context.Context) {
 			if conn == nil {
 				return
 			}
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if _, err := conn.Write(data); err != nil {
 				log.Printf("[peer] write to %s: %v", p.addr, err)
 				return

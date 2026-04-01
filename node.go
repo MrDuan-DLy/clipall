@@ -190,6 +190,10 @@ func (n *Node) acceptLoop(ctx context.Context, listener net.Listener) {
 			log.Printf("[node] accept: %v", err)
 			continue
 		}
+		if tc, ok := conn.(*net.TCPConn); ok {
+			tc.SetKeepAlive(true)
+			tc.SetKeepAlivePeriod(10 * time.Second)
+		}
 		log.Printf("[node] accepted connection from %s", conn.RemoteAddr())
 		go n.handleConn(ctx, conn)
 	}
