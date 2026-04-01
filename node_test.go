@@ -1,13 +1,16 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/cespare/xxhash/v2"
 )
 
 func TestNewNodeInitialization(t *testing.T) {
-	n := NewNode(9876, []string{"host-a:9876", "host-b:9876"}, "")
+	n := NewNode(9876, []string{"host-a:9876", "host-b:9876"}, "", 0)
 
 	if n.listenPort != 9876 {
 		t.Errorf("listenPort = %d, want 9876", n.listenPort)
@@ -27,7 +30,7 @@ func TestNewNodeInitialization(t *testing.T) {
 }
 
 func TestNewNodeNoPeers(t *testing.T) {
-	n := NewNode(5555, nil, "")
+	n := NewNode(5555, nil, "", 0)
 
 	if n.listenPort != 5555 {
 		t.Errorf("listenPort = %d, want 5555", n.listenPort)
@@ -38,7 +41,7 @@ func TestNewNodeNoPeers(t *testing.T) {
 }
 
 func TestIncomingTextRingBufferDedup(t *testing.T) {
-	n := NewNode(9876, nil, "")
+	n := NewNode(9876, nil, "", 0)
 
 	payload := []byte("hello clipboard")
 	id := xxhash.Sum64(payload)
@@ -64,7 +67,7 @@ func TestIncomingTextRingBufferDedup(t *testing.T) {
 }
 
 func TestIncomingImageRingBufferDedup(t *testing.T) {
-	n := NewNode(9876, nil, "")
+	n := NewNode(9876, nil, "", 0)
 
 	payload := make([]byte, 1024)
 	for i := range payload {
@@ -90,7 +93,7 @@ func TestIncomingImageRingBufferDedup(t *testing.T) {
 }
 
 func TestIncomingMixedTypeDedup(t *testing.T) {
-	n := NewNode(9876, nil, "")
+	n := NewNode(9876, nil, "", 0)
 
 	textPayload := []byte("some text")
 	textID := xxhash.Sum64(textPayload)
@@ -119,7 +122,7 @@ func TestIncomingMixedTypeDedup(t *testing.T) {
 }
 
 func TestIncomingChannelCapacity(t *testing.T) {
-	n := NewNode(9876, nil, "")
+	n := NewNode(9876, nil, "", 0)
 
 	// The incoming channel has a buffer of 32. Fill it without blocking.
 	for i := 0; i < 32; i++ {
@@ -145,7 +148,7 @@ func TestIncomingChannelCapacity(t *testing.T) {
 }
 
 func TestIncomingDrainBothTypes(t *testing.T) {
-	n := NewNode(9876, nil, "")
+	n := NewNode(9876, nil, "", 0)
 
 	textMsg := Message{
 		Type:      TypeText,
@@ -183,7 +186,7 @@ func TestRingBufferPreventsLoopAcrossTypes(t *testing.T) {
 	// Simulate the full loop-prevention scenario: a node receives content,
 	// adds it to the ring, then sees the same content from the clipboard
 	// watcher. Both text and image types should be caught.
-	n := NewNode(9876, nil, "")
+	n := NewNode(9876, nil, "", 0)
 
 	textData := []byte("clipboard text")
 	imgData := make([]byte, 512)
@@ -205,6 +208,141 @@ func TestRingBufferPreventsLoopAcrossTypes(t *testing.T) {
 	}
 	if !n.ring.Contains(xxhash.Sum64(imgData)) {
 		t.Error("image echo should be caught by ring buffer")
+	}
+}
+
+func TestSaveImageTimestampedFilename(t *testing.T) {
+	dir := t.TempDir()
+	n := NewNode(9876, nil, dir, 0)
+
+	data := []byte("fake-png-data")
+	path, err := n.saveImage(data)
+	if err != nil {
+		t.Fatalf("saveImage: %v", err)
+	}
+
+	// Should create a timestamped file.
+	if filepath.Dir(path) != dir {
+		t.Errorf("image saved to wrong directory: %s", path)
+	}
+	base := filepath.Base(path)
+	if len(base) < 19 { // "20060102-150405.000.png" = 23 chars
+		t.Errorf("filename too short, expected timestamp format: %s", base)
+	}
+
+	// latest.png should also exist with same content.
+	latestPath := filepath.Join(dir, "latest.png")
+	latestData, err := os.ReadFile(latestPath)
+	if err != nil {
+		t.Fatalf("latest.png not created: %v", err)
+	}
+	if string(latestData) != string(data) {
+		t.Error("latest.png content does not match")
+	}
+}
+
+func TestSaveImageMultipleDoNotOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	n := NewNode(9876, nil, dir, 0)
+
+	n.saveImage([]byte("image-1"))
+	time.Sleep(2 * time.Millisecond) // ensure different timestamp
+	n.saveImage([]byte("image-2"))
+
+	entries, _ := os.ReadDir(dir)
+	// Should have 2 timestamped files + latest.png = 3 files.
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			count++
+		}
+	}
+	if count != 3 {
+		t.Errorf("expected 3 files (2 timestamped + latest.png), got %d", count)
+	}
+}
+
+func TestPruneImagesRemovesOldest(t *testing.T) {
+	dir := t.TempDir()
+	n := NewNode(9876, nil, dir, 1) // 1 MB limit
+
+	// Write files that total > 1MB.
+	bigData := make([]byte, 400*1024) // 400KB each
+	for i := range bigData {
+		bigData[i] = byte(i)
+	}
+
+	n.saveImage(bigData)
+	time.Sleep(10 * time.Millisecond)
+	n.saveImage(bigData)
+	time.Sleep(10 * time.Millisecond)
+	n.saveImage(bigData) // 3 * 400KB = 1.2MB > 1MB, should trigger prune
+
+	entries, _ := os.ReadDir(dir)
+	var pngCount int
+	for _, e := range entries {
+		if !e.IsDir() && e.Name() != "latest.png" && filepath.Ext(e.Name()) == ".png" {
+			pngCount++
+		}
+	}
+	// At least one old file should have been pruned.
+	if pngCount >= 3 {
+		t.Errorf("expected pruning to remove old files, but found %d timestamped files", pngCount)
+	}
+}
+
+func TestPruneImagesKeepsLatestPng(t *testing.T) {
+	dir := t.TempDir()
+	n := NewNode(9876, nil, dir, 1) // 1 MB limit
+
+	bigData := make([]byte, 600*1024) // 600KB
+	n.saveImage(bigData)
+	time.Sleep(10 * time.Millisecond)
+	n.saveImage(bigData) // 2 * 600KB = 1.2MB > 1MB
+
+	// latest.png should still exist.
+	if _, err := os.Stat(filepath.Join(dir, "latest.png")); err != nil {
+		t.Error("latest.png should not be pruned")
+	}
+}
+
+func TestPruneImagesSkipsNonPngFiles(t *testing.T) {
+	dir := t.TempDir()
+	n := NewNode(9876, nil, dir, 1) // 1 MB limit
+
+	// Create a non-png file in the directory.
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("keep me"), 0644)
+
+	bigData := make([]byte, 600*1024)
+	n.saveImage(bigData)
+	time.Sleep(10 * time.Millisecond)
+	n.saveImage(bigData)
+
+	// notes.txt should still exist.
+	if _, err := os.Stat(filepath.Join(dir, "notes.txt")); err != nil {
+		t.Error("non-png file should not be pruned")
+	}
+}
+
+func TestPruneImagesUnlimited(t *testing.T) {
+	dir := t.TempDir()
+	n := NewNode(9876, nil, dir, 0) // 0 = unlimited
+
+	bigData := make([]byte, 500*1024)
+	for i := 0; i < 5; i++ {
+		n.saveImage(bigData)
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	entries, _ := os.ReadDir(dir)
+	var pngCount int
+	for _, e := range entries {
+		if !e.IsDir() && e.Name() != "latest.png" && filepath.Ext(e.Name()) == ".png" {
+			pngCount++
+		}
+	}
+	if pngCount != 5 {
+		t.Errorf("with unlimited size, expected 5 timestamped files, got %d", pngCount)
 	}
 }
 

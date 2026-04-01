@@ -19,6 +19,7 @@ func main() {
 	listen := flag.Int("listen", 9876, "port to listen on")
 	configFile := flag.String("config", "", "path to config file (default: auto-detect)")
 	imageDir := flag.String("save-images-to", "", "save incoming images to this directory (e.g. /tmp/clipall)")
+	imageMaxMB := flag.Int("image-max-size", 100, "max total size of saved images in MB (0 = unlimited)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -86,7 +87,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	node := NewNode(cfg.Listen.Port, peerAddrs, *imageDir)
+	node := NewNode(cfg.Listen.Port, peerAddrs, *imageDir, *imageMaxMB)
 	if err := node.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

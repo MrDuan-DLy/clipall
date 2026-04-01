@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -18,19 +19,21 @@ import (
 const writeCooldown = 500 * time.Millisecond
 
 type Node struct {
-	listenPort int
-	peers      []*Peer
-	incoming   chan Message
-	ring       RingBuffer
-	lastWrite  time.Time  // when we last wrote to clipboard from a remote
-	imageDir   string     // if set, save incoming images to this directory
+	listenPort  int
+	peers       []*Peer
+	incoming    chan Message
+	ring        RingBuffer
+	lastWrite   time.Time // when we last wrote to clipboard from a remote
+	imageDir    string    // if set, save incoming images to this directory
+	imageMaxMB  int       // max total size of saved images in MB (0 = unlimited)
 }
 
-func NewNode(listenPort int, peerAddrs []string, imageDir string) *Node {
+func NewNode(listenPort int, peerAddrs []string, imageDir string, imageMaxMB int) *Node {
 	n := &Node{
 		listenPort: listenPort,
 		incoming:   make(chan Message, 32),
 		imageDir:   imageDir,
+		imageMaxMB: imageMaxMB,
 	}
 	for _, addr := range peerAddrs {
 		n.peers = append(n.peers, NewPeer(addr))
@@ -212,16 +215,75 @@ func (n *Node) handleConn(ctx context.Context, conn net.Conn) {
 	}
 }
 
-// saveImage writes PNG data to imageDir/latest.png, returning the path.
+// saveImage writes PNG data to imageDir with a timestamped filename, returning the path.
+// Also writes latest.png for convenience. Old images are pruned if imageMaxMB is set.
 func (n *Node) saveImage(data []byte) (string, error) {
 	if err := os.MkdirAll(n.imageDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", n.imageDir, err)
 	}
-	path := filepath.Join(n.imageDir, "latest.png")
+	name := time.Now().Format("20060102-150405.000") + ".png"
+	path := filepath.Join(n.imageDir, name)
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return "", err
 	}
+	// Also update latest.png for quick access.
+	if err := os.WriteFile(filepath.Join(n.imageDir, "latest.png"), data, 0644); err != nil {
+		log.Printf("[node] failed to write latest.png: %v", err)
+	}
+
+	if n.imageMaxMB > 0 {
+		n.pruneImages()
+	}
 	return path, nil
+}
+
+// pruneImages removes the oldest timestamped images when total directory size exceeds imageMaxMB.
+func (n *Node) pruneImages() {
+	entries, err := os.ReadDir(n.imageDir)
+	if err != nil {
+		log.Printf("[node] pruneImages: readdir %s: %v", n.imageDir, err)
+		return
+	}
+
+	type fileInfo struct {
+		name    string
+		size    int64
+		modTime time.Time
+	}
+	var files []fileInfo
+	var totalSize int64
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "latest.png" || filepath.Ext(e.Name()) != ".png" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		totalSize += info.Size()
+		files = append(files, fileInfo{name: e.Name(), size: info.Size(), modTime: info.ModTime()})
+	}
+
+	maxBytes := int64(n.imageMaxMB) * 1024 * 1024
+	if totalSize <= maxBytes {
+		return
+	}
+
+	// Sort oldest first.
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].modTime.Before(files[j].modTime)
+	})
+
+	for _, f := range files {
+		if totalSize <= maxBytes {
+			break
+		}
+		path := filepath.Join(n.imageDir, f.name)
+		if err := os.Remove(path); err == nil {
+			log.Printf("[node] pruned old image %s (%d bytes)", f.name, f.size)
+			totalSize -= f.size
+		}
+	}
 }
 
 // debugPreview returns the first 40 chars of data for logging.
