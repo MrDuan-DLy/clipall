@@ -131,19 +131,24 @@ func watchImage(ctx context.Context) <-chan []byte {
 				if cur == seq {
 					continue
 				}
-				seq = cur
 				// Try the library's read first (handles 32-bit DIBV5).
 				data := clipboard.Read(clipboard.FmtImage)
 				if data == nil {
 					// Library failed; try CF_DIB fallback (handles all bit depths).
 					data = readImageDIB()
+					if data == nil {
+						// Clipboard might be locked by the text watcher; retry briefly.
+						time.Sleep(50 * time.Millisecond)
+						data = readImageDIB()
+					}
 					if data != nil {
 						log.Printf("[clipboard] image read via CF_DIB fallback (%d bytes)", len(data))
 					}
 				}
 				if len(data) == 0 {
-					continue
+					continue // Don't update seq — retry on next tick.
 				}
+				seq = cur // Only update after successful read.
 				select {
 				case ch <- data:
 				case <-ctx.Done():
