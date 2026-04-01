@@ -8,11 +8,11 @@ import (
 	"encoding/binary"
 	"image/png"
 	"log"
+	"runtime"
 	"syscall"
 	"time"
 	"unsafe"
 
-	"golang.design/x/clipboard"
 	"golang.org/x/image/bmp"
 )
 
@@ -33,8 +33,8 @@ var (
 const cfDIB = 8
 
 // readImageDIB reads the clipboard image as CF_DIB and converts to PNG.
-// This handles cases where the library's Read(FmtImage) fails, e.g. when
-// Windows screenshots produce 24-bit DIBV5 data that the library rejects.
+// Caller MUST be on a locked OS thread (runtime.LockOSThread) because
+// Windows clipboard operations have thread affinity.
 func readImageDIB() []byte {
 	r, _, _ := procOpenClipboard.Call(0)
 	if r == 0 {
@@ -64,8 +64,6 @@ func readImageDIB() []byte {
 	}
 
 	// Copy DIB data from global memory.
-	// nolint: the uintptr→unsafe.Pointer conversion is safe here because
-	// ptrVal comes from GlobalLock and is valid until GlobalUnlock.
 	dibData := make([]byte, size)
 	copy(dibData, unsafe.Slice((*byte)(*(*unsafe.Pointer)(unsafe.Pointer(&ptrVal))), size))
 
@@ -99,13 +97,13 @@ func readImageDIB() []byte {
 
 	img, err := bmp.Decode(bytes.NewReader(bmpData))
 	if err != nil {
-		log.Printf("[clipboard] DIB fallback: bmp decode failed: %v", err)
+		log.Printf("[clipboard] DIB: bmp decode failed: %v", err)
 		return nil
 	}
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
-		log.Printf("[clipboard] DIB fallback: png encode failed: %v", err)
+		log.Printf("[clipboard] DIB: png encode failed: %v", err)
 		return nil
 	}
 
@@ -113,11 +111,20 @@ func readImageDIB() []byte {
 }
 
 // watchImage watches the clipboard for image changes on Windows.
-// It wraps the library's Read with a CF_DIB fallback for screenshots
-// that the library cannot read (e.g. 24-bit DIBV5 from Win+Shift+S).
+// Uses our own CF_DIB reader instead of the library's Read(FmtImage),
+// which has two issues: (1) rejects 24-bit DIBV5 without CF_DIB fallback,
+// (2) opens/closes the clipboard without LockOSThread, risking thread
+// migration between Open and Close that permanently locks the clipboard.
 func watchImage(ctx context.Context) <-chan []byte {
 	ch := make(chan []byte, 1)
 	go func() {
+		// Windows clipboard API has thread affinity: OpenClipboard and
+		// CloseClipboard MUST run on the same OS thread. Without this
+		// lock, Go's goroutine scheduler can migrate us between threads,
+		// causing CloseClipboard to run on a different thread than
+		// OpenClipboard, which silently leaves the clipboard locked.
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 		defer close(ch)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -131,23 +138,23 @@ func watchImage(ctx context.Context) <-chan []byte {
 				if cur == seq {
 					continue
 				}
-				// Try the library's read first (handles 32-bit DIBV5).
-				data := clipboard.Read(clipboard.FmtImage)
-				if data == nil {
-					// Library failed; try CF_DIB fallback (handles all bit depths).
-					data = readImageDIB()
-					if data == nil {
-						// Clipboard might be locked by the text watcher; retry briefly.
-						time.Sleep(50 * time.Millisecond)
-						data = readImageDIB()
+				// Read image via CF_DIB (handles all bit depths).
+				// Retry up to 3 times with short delays to handle clipboard
+				// contention with the library's text watcher.
+				var data []byte
+				for attempt := 0; attempt < 3; attempt++ {
+					if attempt > 0 {
+						time.Sleep(100 * time.Millisecond)
 					}
+					data = readImageDIB()
 					if data != nil {
-						log.Printf("[clipboard] image read via CF_DIB fallback (%d bytes)", len(data))
+						break
 					}
 				}
 				if len(data) == 0 {
 					continue // Don't update seq — retry on next tick.
 				}
+				log.Printf("[clipboard] image read via CF_DIB (%d bytes)", len(data))
 				seq = cur // Only update after successful read.
 				select {
 				case ch <- data:
