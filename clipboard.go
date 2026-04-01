@@ -22,9 +22,6 @@ func readText() []byte {
 	return clipboard.Read(clipboard.FmtText)
 }
 
-func watchImage(ctx context.Context) <-chan []byte {
-	return clipboard.Watch(ctx, clipboard.FmtImage)
-}
 
 func writeImage(data []byte) {
 	clipboard.Write(clipboard.FmtImage, data)
