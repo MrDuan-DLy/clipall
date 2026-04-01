@@ -52,8 +52,8 @@ func readImageDIB() []byte {
 		return nil
 	}
 
-	ptr, _, _ := procGlobalLock.Call(hMem)
-	if ptr == 0 {
+	ptrVal, _, _ := procGlobalLock.Call(hMem)
+	if ptrVal == 0 {
 		return nil
 	}
 	defer procGlobalUnlock.Call(hMem)
@@ -64,8 +64,10 @@ func readImageDIB() []byte {
 	}
 
 	// Copy DIB data from global memory.
+	// nolint: the uintptr→unsafe.Pointer conversion is safe here because
+	// ptrVal comes from GlobalLock and is valid until GlobalUnlock.
 	dibData := make([]byte, size)
-	copy(dibData, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size))
+	copy(dibData, unsafe.Slice((*byte)(*(*unsafe.Pointer)(unsafe.Pointer(&ptrVal))), size))
 
 	if len(dibData) < 40 {
 		return nil
